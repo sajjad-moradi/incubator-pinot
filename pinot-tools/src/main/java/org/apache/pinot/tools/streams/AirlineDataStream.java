@@ -28,6 +28,7 @@ import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.pinot.common.utils.ModifiableRateLimiter;
 import org.apache.pinot.plugin.inputformat.avro.AvroUtils;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.FieldSpec;
@@ -103,6 +104,8 @@ public class AirlineDataStream {
 
   public void run() {
 
+    ModifiableRateLimiter rateLimiter =
+        new ModifiableRateLimiter("/Users/smoradi/Downloads/producer-rate-limiter.properties");
     service.submit(new Runnable() {
 
       @Override
@@ -128,12 +131,13 @@ public class AirlineDataStream {
             message.put(timeColumnName, currentTimeValue);
 
             try {
+              rateLimiter.acquire();
               publish(message);
               counter++;
               if (counter % 60 == 0) {
                 currentTimeValue = currentTimeValue + 1;
               }
-              Thread.sleep(1000);
+//              Thread.sleep(1000);
             } catch (Exception e) {
               logger.error(e.getMessage());
             }

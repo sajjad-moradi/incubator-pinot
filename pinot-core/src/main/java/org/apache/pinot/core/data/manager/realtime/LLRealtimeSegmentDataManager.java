@@ -73,6 +73,7 @@ import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.data.readers.GenericRow;
 import org.apache.pinot.spi.metrics.PinotMeter;
 import org.apache.pinot.spi.stream.MessageBatch;
+import org.apache.pinot.spi.stream.OffsetCriteria;
 import org.apache.pinot.spi.stream.PartitionGroupConsumer;
 import org.apache.pinot.spi.stream.PartitionGroupConsumptionStatus;
 import org.apache.pinot.spi.stream.PartitionLevelStreamConfig;
@@ -252,6 +253,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private static final int MAX_TIME_FOR_CONSUMING_TO_ONLINE_IN_SECONDS = 31;
 
   private Thread _consumerThread;
+  private Thread _reporterThread;
   private final String _streamTopic;
   private final int _partitionGroupId;
   private final PartitionGroupConsumptionStatus _partitionGroupConsumptionStatus;
@@ -1126,6 +1128,41 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     _consumerThread = new Thread(new PartitionConsumer(), _segmentNameStr);
     segmentLogger.info("Created new consumer thread {} for {}", _consumerThread, this.toString());
     _consumerThread.start();
+
+    _reporterThread = new Thread(() -> {
+      segmentLogger.info("Into partition reporter thread!");
+      while(true) {
+        try {
+          Thread.sleep(1000);
+          segmentLogger.info("Slept for a good second!");
+          segmentLogger.info("Getting smallest offset");
+          StreamPartitionMsgOffset smallestOffset = _streamMetadataProvider
+              .fetchStreamPartitionOffset(OffsetCriteria.SMALLEST_OFFSET_CRITERIA, /*timeout-ms*/20_000);
+          segmentLogger.info("Smallest offset: " + smallestOffset);
+        } catch (Exception e) {
+          segmentLogger.error("Error in fetching the smallest offset", e);
+        }
+
+        segmentLogger.info("Getting largest offset");
+        try {
+          StreamPartitionMsgOffset largestOffset = _streamMetadataProvider
+              .fetchStreamPartitionOffset(new OffsetCriteria.OffsetCriteriaBuilder().withOffsetLargest(), /*timeout-ms*/20_000);
+          segmentLogger.info("Smallest offset: " + largestOffset);
+        } catch (Exception e) {
+          segmentLogger.error("Error in fetching the largest offset", e);
+        }
+
+        segmentLogger.info("Getting period offset");
+        try {
+          StreamPartitionMsgOffset periodOffset = _streamMetadataProvider
+              .fetchStreamPartitionOffset(new OffsetCriteria.OffsetCriteriaBuilder().withOffsetAsPeriod("5s"), /*timeout-ms*/20_000);
+          segmentLogger.info("Period offset: " + periodOffset);
+        } catch (Exception e) {
+          segmentLogger.error("Error in fetching the period offset", e);
+        }
+      }
+    });
+    _reporterThread.start();
   }
 
   /**

@@ -44,17 +44,18 @@ public interface StreamMetadataProvider extends Closeable {
   // Issue 5953 Retain this interface for 0.5.0, remove in 0.6.0
   @Deprecated
   long fetchPartitionOffset(@Nonnull OffsetCriteria offsetCriteria, long timeoutMillis)
-      throws java.util.concurrent.TimeoutException;
+      throws TimeoutException;
   /**
    * Fetches the offset for a given partition and offset criteria
    * @param offsetCriteria offset criteria to fetch{@link StreamPartitionMsgOffset}.
    *                       Depends on the semantics of the stream e.g. smallest, largest for Kafka
    * @param timeoutMillis fetch timeout
    * @return {@link StreamPartitionMsgOffset} based on the offset criteria provided
-   * @throws java.util.concurrent.TimeoutException if timed out trying to connect and fetch from stream
+   * @throws TimeoutException if timed out trying to connect and fetch from stream
    */
-  default StreamPartitionMsgOffset fetchStreamPartitionOffset(@Nonnull OffsetCriteria offsetCriteria, long timeoutMillis)
-      throws java.util.concurrent.TimeoutException {
+  default StreamPartitionMsgOffset fetchStreamPartitionOffset(@Nonnull OffsetCriteria offsetCriteria,
+      long timeoutMillis)
+      throws TimeoutException {
     long offset = fetchPartitionOffset(offsetCriteria, timeoutMillis);
     return new LongMsgOffset(offset);
   }
