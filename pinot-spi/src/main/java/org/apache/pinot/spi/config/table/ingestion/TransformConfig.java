@@ -35,11 +35,21 @@ public class TransformConfig extends BaseJsonConfig {
   @JsonPropertyDescription("Transformation function string")
   private final String _transformFunction;
 
+  @JsonPropertyDescription("Stream name to which this transformation is applied")
+  private final String _streamName;
+
   @JsonCreator
   public TransformConfig(@JsonProperty("columnName") String columnName,
-      @JsonProperty("transformFunction") String transformFunction) {
+      @JsonProperty("transformFunction") String transformFunction, @JsonProperty("streamName") String streamName) {
     _columnName = columnName;
     _transformFunction = transformFunction;
+    _streamName = streamName;
+  }
+
+  public TransformConfig(String columnName, String transformFunction) {
+    _columnName = columnName;
+    _transformFunction = transformFunction;
+    _streamName = null;
   }
 
   public String getColumnName() {
@@ -48,5 +58,9 @@ public class TransformConfig extends BaseJsonConfig {
 
   public String getTransformFunction() {
     return _transformFunction;
+  }
+
+  public String getStreamName() {
+    return _streamName;
   }
 }

@@ -1195,8 +1195,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     String timeColumnName = tableConfig.getValidationConfig().getTimeColumnName();
     // TODO Validate configs
     IndexingConfig indexingConfig = _tableConfig.getIndexingConfig();
-    _partitionLevelStreamConfig =
-        new PartitionLevelStreamConfig(_tableNameWithType, IngestionConfigUtils.getStreamConfigMap(_tableConfig));
+    _partitionLevelStreamConfig = new PartitionLevelStreamConfig(_tableNameWithType,
+        IngestionConfigUtils.getStreamConfigMap(_tableConfig, llcSegmentName.getStreamName()));
     _streamConsumerFactory = StreamConsumerFactoryProvider.create(_partitionLevelStreamConfig);
     _streamPartitionMsgOffsetFactory =
         StreamConsumerFactoryProvider.create(_partitionLevelStreamConfig).createStreamMsgOffsetFactory();
@@ -1296,7 +1296,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     _clientId = _streamTopic + "-" + _partitionGroupId;
 
     // Create record transformer
-    _recordTransformer = CompositeTransformer.getDefaultTransformer(tableConfig, schema);
+    _recordTransformer = CompositeTransformer.getDefaultTransformer(tableConfig, schema, _streamTopic);
 
     // Create complex type transformer
     _complexTypeTransformer = ComplexTypeTransformer.getComplexTypeTransformer(tableConfig);

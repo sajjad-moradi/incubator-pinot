@@ -21,6 +21,7 @@ package org.apache.pinot.controller.validation;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
 import org.apache.pinot.common.metrics.ControllerMetrics;
@@ -97,10 +98,12 @@ public class RealtimeSegmentValidationManager extends ControllerPeriodicTask<Rea
         runSegmentLevelValidation(tableConfig);
       }
 
-      PartitionLevelStreamConfig streamConfig = new PartitionLevelStreamConfig(tableConfig.getTableName(),
-          IngestionConfigUtils.getStreamConfigMap(tableConfig));
-      if (streamConfig.hasLowLevelConsumerType()) {
-        _llcRealtimeSegmentManager.ensureAllPartitionsConsuming(tableConfig, streamConfig);
+      for (Map<String, String> streamConfigMap : IngestionConfigUtils.getStreamConfigMaps(tableConfig)) {
+        PartitionLevelStreamConfig streamConfig =
+            new PartitionLevelStreamConfig(tableConfig.getTableName(), streamConfigMap);
+        if (streamConfig.hasLowLevelConsumerType()) {
+          _llcRealtimeSegmentManager.ensureAllPartitionsConsuming(tableConfig, streamConfig);
+        }
       }
     }
   }
@@ -108,18 +111,22 @@ public class RealtimeSegmentValidationManager extends ControllerPeriodicTask<Rea
   private void runSegmentLevelValidation(TableConfig tableConfig) {
     String realtimeTableName = tableConfig.getTableName();
     List<SegmentZKMetadata> segmentsZKMetadata = _pinotHelixResourceManager.getSegmentsZKMetadata(realtimeTableName);
-    boolean countHLCSegments = true;  // false if this table has ONLY LLC segments (i.e. fully migrated)
-    StreamConfig streamConfig =
-        new StreamConfig(realtimeTableName, IngestionConfigUtils.getStreamConfigMap(tableConfig));
-    if (streamConfig.hasLowLevelConsumerType() && !streamConfig.hasHighLevelConsumerType()) {
-      countHLCSegments = false;
+    boolean hasHLCSegments = false;
+    boolean hasLLCSegments = false;
+    for (Map<String, String> streamConfigMap : IngestionConfigUtils.getStreamConfigMaps(tableConfig)) {
+      StreamConfig streamConfig = new StreamConfig(realtimeTableName, streamConfigMap);
+      if (streamConfig.hasHighLevelConsumerType()) {
+        hasHLCSegments = true;
+      }
+      if (streamConfig.hasLowLevelConsumerType()) {
+        hasLLCSegments = true;
+      }
     }
     // Update the gauge to contain the total document count in the segments
     _validationMetrics.updateTotalDocumentCountGauge(tableConfig.getTableName(),
-        computeRealtimeTotalDocumentInSegments(segmentsZKMetadata, countHLCSegments));
+        computeRealtimeTotalDocumentInSegments(segmentsZKMetadata, hasHLCSegments));
 
-    if (streamConfig.hasLowLevelConsumerType()
-        && _llcRealtimeSegmentManager.isDeepStoreLLCSegmentUploadRetryEnabled()) {
+    if (hasLLCSegments && _llcRealtimeSegmentManager.isDeepStoreLLCSegmentUploadRetryEnabled()) {
       _llcRealtimeSegmentManager.uploadToDeepStoreIfMissing(tableConfig, segmentsZKMetadata);
     }
   }

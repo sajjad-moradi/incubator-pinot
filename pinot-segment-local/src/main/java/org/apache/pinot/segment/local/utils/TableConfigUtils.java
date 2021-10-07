@@ -21,9 +21,11 @@ package org.apache.pinot.segment.local.utils;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -245,10 +247,11 @@ public final class TableConfigUtils {
         Preconditions.checkState(indexingConfig == null || MapUtils.isEmpty(indexingConfig.getStreamConfigs()),
             "Should not use indexingConfig#getStreamConfigs if ingestionConfig#StreamIngestionConfig is provided");
         List<Map<String, String>> streamConfigMaps = ingestionConfig.getStreamIngestionConfig().getStreamConfigMaps();
-        Preconditions.checkState(streamConfigMaps.size() == 1, "Only 1 stream is supported in REALTIME table");
         try {
-          // Validate that StreamConfig can be created
-          new StreamConfig(tableNameWithType, streamConfigMaps.get(0));
+          streamConfigMaps.forEach(streamConfigMap -> {
+            // Validate that StreamConfig can be created
+            new StreamConfig(tableNameWithType, streamConfigMaps.get(0));
+          });
         } catch (Exception e) {
           throw new IllegalStateException("Could not create StreamConfig using the streamConfig map", e);
         }
@@ -270,7 +273,7 @@ public final class TableConfigUtils {
       // Transform configs
       List<TransformConfig> transformConfigs = ingestionConfig.getTransformConfigs();
       if (transformConfigs != null) {
-        Set<String> transformColumns = new HashSet<>();
+        Map<String, String> transformColumnToStreamName = new HashMap<>();
         for (TransformConfig transformConfig : transformConfigs) {
           String columnName = transformConfig.getColumnName();
           if (schema != null) {
@@ -282,8 +285,14 @@ public final class TableConfigUtils {
             throw new IllegalStateException(
                 "columnName/transformFunction cannot be null in TransformConfig " + transformConfig);
           }
-          if (!transformColumns.add(columnName)) {
-            throw new IllegalStateException("Duplicate transform config found for column '" + columnName + "'");
+          String streamName = transformConfig.getStreamName();
+          if (transformColumnToStreamName.containsKey(columnName) && Objects
+              .equals(streamName, transformColumnToStreamName.get(columnName))) {
+            throw new IllegalStateException(
+                "Duplicate transform config found for column '" + columnName + "'" + (streamName != null ?
+                    " and stream '" + streamName + "'" : ""));
+          } else {
+            transformColumnToStreamName.put(columnName, streamName);
           }
           FunctionEvaluator expressionEvaluator;
           try {
@@ -339,10 +348,11 @@ public final class TableConfigUtils {
     Preconditions.checkState(CollectionUtils.isNotEmpty(schema.getPrimaryKeyColumns()),
         "Upsert table must have primary key columns in the schema");
     // consumer type must be low-level
-    Map<String, String> streamConfigsMap = IngestionConfigUtils.getStreamConfigMap(tableConfig);
-    StreamConfig streamConfig = new StreamConfig(tableConfig.getTableName(), streamConfigsMap);
-    Preconditions.checkState(streamConfig.hasLowLevelConsumerType() && !streamConfig.hasHighLevelConsumerType(),
-        "Upsert table must use low-level streaming consumer type");
+    for (Map<String, String> streamConfigsMap : IngestionConfigUtils.getStreamConfigMaps(tableConfig)) {
+      StreamConfig streamConfig = new StreamConfig(tableConfig.getTableName(), streamConfigsMap);
+      Preconditions.checkState(streamConfig.hasLowLevelConsumerType() && !streamConfig.hasHighLevelConsumerType(),
+          "Upsert table must use low-level streaming consumer type");
+    }
     // replica group is configured for routing
     Preconditions.checkState(
         tableConfig.getRoutingConfig() != null && RoutingConfig.STRICT_REPLICA_GROUP_INSTANCE_SELECTOR_TYPE

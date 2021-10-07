@@ -127,7 +127,7 @@ public class SegmentCompletionManager {
     final String rawTableName = llcSegmentName.getTableName();
     TableConfig tableConfig = _segmentManager.getTableConfig(TableNameBuilder.REALTIME.tableNameWithType(rawTableName));
     PartitionLevelStreamConfig streamConfig = new PartitionLevelStreamConfig(tableConfig.getTableName(),
-        IngestionConfigUtils.getStreamConfigMap(tableConfig));
+        IngestionConfigUtils.getStreamConfigMap(tableConfig, llcSegmentName.getStreamName()));
     return StreamConsumerFactoryProvider.create(streamConfig).createStreamMsgOffsetFactory();
   }
 
@@ -434,7 +434,8 @@ public class SegmentCompletionManager {
       _maxTimeToPickWinnerMs = _startTimeMs + MAX_TIME_TO_PICK_WINNER_MS;
       _maxTimeToNotifyWinnerMs = _startTimeMs + MAX_TIME_TO_NOTIFY_WINNER_MS;
       _streamPartitionMsgOffsetFactory = _segmentCompletionManager.getStreamPartitionMsgOffsetFactory(_segmentName);
-      long initialCommitTimeMs = MAX_TIME_TO_NOTIFY_WINNER_MS + _segmentManager.getCommitTimeoutMS(_realtimeTableName);
+      long initialCommitTimeMs = MAX_TIME_TO_NOTIFY_WINNER_MS + _segmentManager
+          .getCommitTimeoutMS(_realtimeTableName, _segmentName.getStreamName());
       Long savedCommitTime = _segmentCompletionManager._commitTimeMap.get(_rawTableName);
       if (savedCommitTime != null && savedCommitTime > initialCommitTimeMs) {
         initialCommitTimeMs = savedCommitTime;

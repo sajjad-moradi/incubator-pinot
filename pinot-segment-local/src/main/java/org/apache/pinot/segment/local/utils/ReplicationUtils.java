@@ -18,6 +18,9 @@
  */
 package org.apache.pinot.segment.local.utils;
 
+import com.google.common.base.Preconditions;
+import java.util.List;
+import java.util.Map;
 import org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
@@ -36,12 +39,9 @@ public class ReplicationUtils {
    * Decides if {@link SegmentsValidationAndRetentionConfig ::getReplicationNumber} should be used
    */
   public static boolean useReplication(TableConfig tableConfig) {
-
     TableType tableType = tableConfig.getTableType();
     if (tableType.equals(TableType.REALTIME)) {
-      StreamConfig streamConfig =
-          new StreamConfig(tableConfig.getTableName(), IngestionConfigUtils.getStreamConfigMap(tableConfig));
-      return streamConfig.hasHighLevelConsumerType();
+      return IngestionConfigUtils.hasHighLevelConsumerType(tableConfig);
     }
     return true;
   }
@@ -53,9 +53,7 @@ public class ReplicationUtils {
 
     TableType tableType = tableConfig.getTableType();
     if (tableType.equals(TableType.REALTIME)) {
-      StreamConfig streamConfig =
-          new StreamConfig(tableConfig.getTableName(), IngestionConfigUtils.getStreamConfigMap(tableConfig));
-      return streamConfig.hasLowLevelConsumerType();
+      return IngestionConfigUtils.hasLowLevelConsumerType(tableConfig);
     }
     return false;
   }

@@ -1339,9 +1339,19 @@ public class PinotHelixResourceManager {
 
   private void verifyStreamConfig(String tableNameWithType, TableConfig tableConfig) {
     // Check if HLC table is allowed.
-    StreamConfig streamConfig =
-        new StreamConfig(tableNameWithType, IngestionConfigUtils.getStreamConfigMap(tableConfig));
-    if (streamConfig.hasHighLevelConsumerType() && !_allowHLCTables) {
+    List<Map<String, String>> streamConfigMaps = IngestionConfigUtils.getStreamConfigMaps(tableConfig);
+    boolean hasHLConsumerType = false;
+    for (Map<String, String> streamConfigMap : streamConfigMaps) {
+      StreamConfig streamConfig = new StreamConfig(tableNameWithType, streamConfigMap);
+      if (streamConfig.hasHighLevelConsumerType()) {
+        hasHLConsumerType = true;
+      }
+    }
+    if (hasHLConsumerType && streamConfigMaps.size() > 1) {
+      throw new InvalidTableConfigException(
+          "HLC cannot be configured for tables with multi-stream consumption. Table name: " + tableNameWithType);
+    }
+    if (hasHLConsumerType && !_allowHLCTables) {
       throw new InvalidTableConfigException(
           "Creating HLC realtime table is not allowed for Table: " + tableNameWithType);
     }
@@ -1351,11 +1361,12 @@ public class PinotHelixResourceManager {
     // Need to apply environment variabls here to ensure the secrets used in stream configs are correctly applied.
     TableConfig realtimeTableConfig = ConfigUtils.applyConfigWithEnvVariables(rawRealtimeTableConfig);
     String realtimeTableName = realtimeTableConfig.getTableName();
-    StreamConfig streamConfig = new StreamConfig(realtimeTableConfig.getTableName(),
-        IngestionConfigUtils.getStreamConfigMap(realtimeTableConfig));
     IdealState idealState = getTableIdealState(realtimeTableName);
 
-    if (streamConfig.hasHighLevelConsumerType()) {
+    boolean hasHLConsumerType = IngestionConfigUtils.hasHighLevelConsumerType(realtimeTableConfig);
+    boolean hasLLConsumerType = IngestionConfigUtils.hasLowLevelConsumerType(realtimeTableConfig);
+
+    if (hasHLConsumerType) {
       if (idealState == null) {
         LOGGER.info("Initializing IdealState for HLC table: {}", realtimeTableName);
         idealState = PinotTableIdealStateBuilder
@@ -1364,7 +1375,7 @@ public class PinotHelixResourceManager {
         _helixAdmin.addResource(_helixClusterName, realtimeTableName, idealState);
       } else {
         // Remove LLC segments if it is not configured
-        if (!streamConfig.hasLowLevelConsumerType()) {
+        if (!hasLLConsumerType) {
           _pinotLLCRealtimeSegmentManager.removeLLCSegments(idealState);
         }
       }
@@ -1372,8 +1383,8 @@ public class PinotHelixResourceManager {
       ensurePropertyStoreEntryExistsForHighLevelConsumer(realtimeTableName);
     }
 
-    // Either we have only low-level consumer, or both.
-    if (streamConfig.hasLowLevelConsumerType()) {
+    // For each StreamConfig, either we have only low-level consumer, or both.
+    if (hasLLConsumerType) {
       // Will either create idealstate entry, or update the IS entry with new segments
       // (unless there are low-level segments already present)
       if (ZKMetadataProvider.getLLCRealtimeSegments(_propertyStore, realtimeTableName).isEmpty()) {

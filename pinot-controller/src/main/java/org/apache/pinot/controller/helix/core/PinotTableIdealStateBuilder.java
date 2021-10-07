@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.controller.helix.core;
 
+import com.google.common.base.Preconditions;
 import java.util.List;
 import java.util.Map;
 import org.apache.helix.HelixManager;
@@ -96,9 +97,11 @@ public class PinotTableIdealStateBuilder {
       throw new RuntimeException(
           "Number of instance in current tenant should be an integer multiples of the number of replications");
     }
+    List<Map<String, String>> streamConfigMaps = IngestionConfigUtils.getStreamConfigMaps(realtimeTableConfig);
+    Preconditions.checkState(streamConfigMaps.size() == 1, "Only 1 HL stream supported per table");
     setupInstanceConfigForHighLevelConsumer(realtimeTableName, realtimeInstances.size(),
         Integer.parseInt(realtimeTableConfig.getValidationConfig().getReplication()),
-        IngestionConfigUtils.getStreamConfigMap(realtimeTableConfig), zkHelixPropertyStore, realtimeInstances);
+        streamConfigMaps.get(0), zkHelixPropertyStore, realtimeInstances);
     return idealState;
   }
 

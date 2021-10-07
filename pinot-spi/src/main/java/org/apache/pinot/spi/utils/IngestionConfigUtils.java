@@ -19,15 +19,21 @@
 package org.apache.pinot.spi.utils;
 
 import com.google.common.base.Preconditions;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import javax.annotation.Nullable;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.config.table.ingestion.BatchIngestionConfig;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.ingestion.batch.BatchConfigProperties;
+import org.apache.pinot.spi.stream.StreamConfig;
+import org.apache.pinot.spi.stream.StreamConfigProperties;
 
 
 /**
@@ -50,27 +56,79 @@ public final class IngestionConfigUtils {
    * First, the ingestionConfigs->stream->streamConfigs will be checked.
    * If not found, the indexingConfig->streamConfigs will be checked (which is deprecated).
    * @param tableConfig realtime table config
-   * @return streamConfigs map
+   * @return list of streamConfigs map
    */
-  public static Map<String, String> getStreamConfigMap(TableConfig tableConfig) {
+  public static List<Map<String, String>> getStreamConfigMaps(TableConfig tableConfig) {
     String tableNameWithType = tableConfig.getTableName();
     Preconditions.checkState(tableConfig.getTableType() == TableType.REALTIME,
         "Cannot fetch streamConfigs for OFFLINE table: %s", tableNameWithType);
-    Map<String, String> streamConfigMap = null;
     if (tableConfig.getIngestionConfig() != null
         && tableConfig.getIngestionConfig().getStreamIngestionConfig() != null) {
-      List<Map<String, String>> streamConfigMaps =
-          tableConfig.getIngestionConfig().getStreamIngestionConfig().getStreamConfigMaps();
-      Preconditions.checkState(streamConfigMaps.size() == 1, "Only 1 stream supported per table");
-      streamConfigMap = streamConfigMaps.get(0);
+      return tableConfig.getIngestionConfig().getStreamIngestionConfig().getStreamConfigMaps();
     }
-    if (streamConfigMap == null && tableConfig.getIndexingConfig() != null) {
-      streamConfigMap = tableConfig.getIndexingConfig().getStreamConfigs();
+    if (tableConfig.getIndexingConfig() != null) {
+      return Collections.singletonList(tableConfig.getIndexingConfig().getStreamConfigs());
     }
-    if (streamConfigMap == null) {
-      throw new IllegalStateException("Could not find streamConfigs for REALTIME table: " + tableNameWithType);
+    throw new IllegalStateException("Could not find streamConfigs for REALTIME table: " + tableNameWithType);
+  }
+
+  /*
+  TODO
+   */
+  public static Map<String, String> getStreamConfigMap(TableConfig tableConfig, @Nullable String streamName) {
+    List<Map<String, String>> streamConfigMaps = getStreamConfigMaps(tableConfig);
+    if (streamName == null) {
+      Preconditions.checkState(streamConfigMaps.size() == 1, "One stream config map is expected");
+      return streamConfigMaps.get(0);
     }
-    return streamConfigMap;
+    for (Map<String, String> streamConfigMap : streamConfigMaps) {
+      String type = streamConfigMap.get(StreamConfigProperties.STREAM_TYPE);
+      String topicNameKey =
+          StreamConfigProperties.constructStreamProperty(type, StreamConfigProperties.STREAM_TOPIC_NAME);
+      if (streamConfigMap.get(topicNameKey).equals(streamName)) {
+        return streamConfigMap;
+      }
+    }
+    throw new IllegalStateException(String
+        .format("Could not find streamConfigs for stream '%s' in stream config maps: %s", streamName,
+            streamConfigMaps));
+  }
+
+  /**
+   * TODO
+   */
+  public static boolean isMultiTopicConsumption(TableConfig tableConfig) {
+    return getStreamConfigMaps(tableConfig).size() > 1;
+  }
+
+  /**
+   * TODO
+   */
+  public static boolean hasHighLevelConsumerType(TableConfig tableConfig) {
+    List<Map<String, String>> streamConfigMaps = getStreamConfigMaps(tableConfig);
+    boolean hasHLConsumerType = false;
+    for (Map<String, String> streamConfigMap : streamConfigMaps) {
+      StreamConfig streamConfig = new StreamConfig(tableConfig.getTableName(), streamConfigMap);
+      if (streamConfig.hasHighLevelConsumerType()) {
+        hasHLConsumerType = true;
+      }
+    }
+    Preconditions
+        .checkState(streamConfigMaps.size() == 1 || !hasHLConsumerType, "Only one HL stream supported per table");
+    return hasHLConsumerType;
+  }
+
+  /**
+   * TODO
+   */
+  public static boolean hasLowLevelConsumerType(TableConfig tableConfig) {
+    for (Map<String, String> streamConfigMap : getStreamConfigMaps(tableConfig)) {
+      StreamConfig streamConfig = new StreamConfig(tableConfig.getTableName(), streamConfigMap);
+      if (streamConfig.hasLowLevelConsumerType()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

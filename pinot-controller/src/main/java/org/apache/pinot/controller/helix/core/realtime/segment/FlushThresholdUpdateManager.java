@@ -37,19 +37,22 @@ public class FlushThresholdUpdateManager {
    * table because we want to maintain tuning information for the table in the updater.
    */
   public FlushThresholdUpdater getFlushThresholdUpdater(PartitionLevelStreamConfig streamConfig) {
-    String realtimeTableName = streamConfig.getTableNameWithType();
+    String tableNameTopicName = streamConfig.getTableNameWithType() + "_" + streamConfig.getTopicName();
     int flushThresholdRows = streamConfig.getFlushThresholdRows();
-
     if (flushThresholdRows > 0) {
-      _flushThresholdUpdaterMap.remove(realtimeTableName);
+      _flushThresholdUpdaterMap.remove(tableNameTopicName);
       return new DefaultFlushThresholdUpdater(flushThresholdRows);
     } else {
       return _flushThresholdUpdaterMap
-          .computeIfAbsent(realtimeTableName, k -> new SegmentSizeBasedFlushThresholdUpdater());
+          .computeIfAbsent(tableNameTopicName, k -> new SegmentSizeBasedFlushThresholdUpdater());
     }
   }
 
   public void clearFlushThresholdUpdater(String realtimeTableName) {
-    _flushThresholdUpdaterMap.remove(realtimeTableName);
+    for (String tableNameTopicName: _flushThresholdUpdaterMap.keySet()) {
+      if (tableNameTopicName.startsWith(realtimeTableName)) {
+        _flushThresholdUpdaterMap.remove(realtimeTableName);
+      }
+    }
   }
 }

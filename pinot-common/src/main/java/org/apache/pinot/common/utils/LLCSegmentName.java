@@ -27,8 +27,10 @@ import org.joda.time.format.DateTimeFormatter;
 public class LLCSegmentName extends SegmentName implements Comparable {
   private final static String DATE_FORMAT = "yyyyMMdd'T'HHmm'Z'";
   private final static DateTimeFormatter DATE_FORMATTER = DateTimeFormat.forPattern(DATE_FORMAT).withZoneUTC();
+  private final static String TABLE_STREAM_SEPARATOR = "_@_";
 
   private final String _tableName;
+  private final String _streamName; // null means the segment is not for a table which consumes from multiple streams
   private final int _partitionGroupId;
   private final int _sequenceNumber;
   private final String _creationTime;
@@ -41,22 +43,37 @@ public class LLCSegmentName extends SegmentName implements Comparable {
 
     _segmentName = segmentName;
     String[] parts = StringUtils.splitByWholeSeparator(segmentName, SEPARATOR);
-    _tableName = parts[0];
+    String tableNameStreamName = parts[0];
+    if (tableNameStreamName.contains(TABLE_STREAM_SEPARATOR)) {
+      String[] tableNameStreamNameParts = StringUtils.splitByWholeSeparator(tableNameStreamName, TABLE_STREAM_SEPARATOR);
+      _tableName = tableNameStreamNameParts[0];
+      _streamName = tableNameStreamNameParts[1];
+    } else {
+      _tableName = tableNameStreamName;
+      _streamName = null;
+    }
     _partitionGroupId = Integer.parseInt(parts[1]);
     _sequenceNumber = Integer.parseInt(parts[2]);
     _creationTime = parts[3];
   }
 
   public LLCSegmentName(String tableName, int partitionGroupId, int sequenceNumber, long msSinceEpoch) {
+    this(tableName, /*streamName=*/null, partitionGroupId, sequenceNumber, msSinceEpoch);
+  }
+
+  public LLCSegmentName(String tableName, String streamName, int partitionGroupId, int sequenceNumber,
+      long msSinceEpoch) {
     if (!isValidComponentName(tableName)) {
       throw new RuntimeException("Invalid table name " + tableName);
     }
     _tableName = tableName;
+    _streamName = streamName;
     _partitionGroupId = partitionGroupId;
     _sequenceNumber = sequenceNumber;
     // ISO8601 date: 20160120T1234Z
     _creationTime = DATE_FORMATTER.print(msSinceEpoch);
-    _segmentName = tableName + SEPARATOR + partitionGroupId + SEPARATOR + sequenceNumber + SEPARATOR + _creationTime;
+    _segmentName = tableName + (isForMultiStreamTable() ? TABLE_STREAM_SEPARATOR + streamName : "")
+        + SEPARATOR + partitionGroupId + SEPARATOR + sequenceNumber + SEPARATOR + _creationTime;
   }
 
   /**
@@ -74,6 +91,14 @@ public class LLCSegmentName extends SegmentName implements Comparable {
   @Override
   public String getTableName() {
     return _tableName;
+  }
+
+  public String getStreamName() {
+    return _streamName;
+  }
+
+  public boolean isForMultiStreamTable() {
+    return _streamName != null;
   }
 
   @Override
@@ -113,7 +138,8 @@ public class LLCSegmentName extends SegmentName implements Comparable {
   @Override
   public int compareTo(Object o) {
     LLCSegmentName other = (LLCSegmentName) o;
-    if (!this.getTableName().equals(other.getTableName())) {
+    if (!this.getTableName().equals(other.getTableName()) ||
+        (this._streamName != null && !this._streamName.equals(other._streamName))) {
       throw new RuntimeException(
           "Cannot compare segment names " + this.getSegmentName() + " and " + other.getSegmentName());
     }
@@ -157,6 +183,9 @@ public class LLCSegmentName extends SegmentName implements Comparable {
     if (_tableName != null ? !_tableName.equals(segName._tableName) : segName._tableName != null) {
       return false;
     }
+    if (_streamName != null ? !_streamName.equals(segName._streamName) : segName._streamName != null) {
+      return false;
+    }
     if (_creationTime != null ? !_creationTime.equals(segName._creationTime) : segName._creationTime != null) {
       return false;
     }
@@ -166,6 +195,7 @@ public class LLCSegmentName extends SegmentName implements Comparable {
   @Override
   public int hashCode() {
     int result = _tableName != null ? _tableName.hashCode() : 0;
+    result = 31 * result + (_streamName != null ? _streamName.hashCode() : 0);
     result = 31 * result + _partitionGroupId;
     result = 31 * result + _sequenceNumber;
     result = 31 * result + (_creationTime != null ? _creationTime.hashCode() : 0);

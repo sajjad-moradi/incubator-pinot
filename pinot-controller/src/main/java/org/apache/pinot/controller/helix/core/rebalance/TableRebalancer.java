@@ -145,8 +145,8 @@ public class TableRebalancer {
     // Validate table config
     try {
       // Do not allow rebalancing HLC real-time table
-      if (tableConfig.getTableType() == TableType.REALTIME && new StreamConfig(tableNameWithType,
-          IngestionConfigUtils.getStreamConfigMap(tableConfig)).hasHighLevelConsumerType()) {
+      if (tableConfig.getTableType() == TableType.REALTIME && IngestionConfigUtils
+          .hasHighLevelConsumerType(tableConfig)) {
         LOGGER.warn("Cannot rebalance table: {} with high-level consumer, aborting the rebalance", tableNameWithType);
         return new RebalanceResult(RebalanceResult.Status.FAILED, "Cannot rebalance table with high-level consumer",
             null, null);

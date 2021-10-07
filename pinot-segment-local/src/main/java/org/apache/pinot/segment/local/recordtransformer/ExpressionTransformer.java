@@ -43,13 +43,20 @@ public class ExpressionTransformer implements RecordTransformer {
   private final LinkedHashMap<String, FunctionEvaluator> _expressionEvaluators = new LinkedHashMap<>();
 
   public ExpressionTransformer(TableConfig tableConfig, Schema schema) {
+    this(tableConfig, schema, null);
+  }
+
+  public ExpressionTransformer(TableConfig tableConfig, Schema schema, String streamName) {
     Map<String, FunctionEvaluator> expressionEvaluators = new HashMap<>();
     if (tableConfig.getIngestionConfig() != null && tableConfig.getIngestionConfig().getTransformConfigs() != null) {
       for (TransformConfig transformConfig : tableConfig.getIngestionConfig().getTransformConfigs()) {
-        expressionEvaluators.put(transformConfig.getColumnName(),
-            FunctionEvaluatorFactory.getExpressionEvaluator(transformConfig.getTransformFunction()));
+        if (streamName == null || streamName.equals(transformConfig.getStreamName())) {
+          expressionEvaluators.put(transformConfig.getColumnName(),
+              FunctionEvaluatorFactory.getExpressionEvaluator(transformConfig.getTransformFunction()));
+        }
       }
     }
+    // TODO transforms in schema are deprecated; remove the followings when transforms are removed from schema
     for (FieldSpec fieldSpec : schema.getAllFieldSpecs()) {
       String fieldName = fieldSpec.getName();
       if (!fieldSpec.isVirtualColumn() && !expressionEvaluators.containsKey(fieldName)) {

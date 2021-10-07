@@ -36,7 +36,6 @@ public class CompositeTransformer implements RecordTransformer {
   /**
    * Returns a record transformer that performs null value handling, time/expression/data-type transformation and record
    * sanitization.
-   * <p>NOTE: DO NOT CHANGE THE ORDER OF THE RECORD TRANSFORMERS
    * <ul>
    *   <li>
    *     {@link ExpressionTransformer} before everyone else, so that we get the real columns for other transformers to
@@ -59,10 +58,26 @@ public class CompositeTransformer implements RecordTransformer {
    * </ul>
    */
   public static CompositeTransformer getDefaultTransformer(TableConfig tableConfig, Schema schema) {
-    return new CompositeTransformer(Arrays
-        .asList(new ExpressionTransformer(tableConfig, schema), new FilterTransformer(tableConfig),
+    return new CompositeTransformer(
+        createOrderedList(new ExpressionTransformer(tableConfig, schema), new FilterTransformer(tableConfig),
             new DataTypeTransformer(schema), new NullValueTransformer(tableConfig, schema),
             new SanitizationTransformer(schema)));
+  }
+
+  /**
+   * Returns a record transformer that performs null value handling, time/expression/data-type transformation and record
+   * sanitization.
+   */
+  public static CompositeTransformer getDefaultTransformer(TableConfig tableConfig, Schema schema, String streamName) {
+    return new CompositeTransformer(createOrderedList(new ExpressionTransformer(tableConfig, schema, streamName),
+        new FilterTransformer(tableConfig), new DataTypeTransformer(schema),
+        new NullValueTransformer(tableConfig, schema), new SanitizationTransformer(schema)));
+  }
+
+  // NOTE: DO NOT CHANGE THE ORDER OF THE RECORD TRANSFORMERS
+  private static List<RecordTransformer> createOrderedList(ExpressionTransformer expression, FilterTransformer filter,
+      DataTypeTransformer dataType, NullValueTransformer nullValue, SanitizationTransformer sanitize) {
+    return Arrays.asList(expression, filter, dataType, nullValue, sanitize);
   }
 
   /**

@@ -106,9 +106,7 @@ public class RealtimeToOfflineSegmentsTaskGenerator implements PinotTaskGenerato
         LOGGER.warn("Skip generating task: {} for non-REALTIME table: {}", taskType, realtimeTableName);
         continue;
       }
-      StreamConfig streamConfig =
-          new StreamConfig(realtimeTableName, IngestionConfigUtils.getStreamConfigMap(tableConfig));
-      if (streamConfig.hasHighLevelConsumerType()) {
+      if (IngestionConfigUtils.hasHighLevelConsumerType(tableConfig)) {
         LOGGER.warn("Skip generating task: {} for HLC REALTIME table: {}", taskType, realtimeTableName);
         continue;
       }

@@ -67,8 +67,7 @@ public class SegmentRelocator extends ControllerPeriodicTask<Void> {
 
     // Segment relocation doesn't apply to HLC
     boolean isRealtimeTable = TableNameBuilder.isRealtimeTableResource(tableNameWithType);
-    if (isRealtimeTable && new StreamConfig(tableNameWithType, IngestionConfigUtils.getStreamConfigMap(tableConfig))
-        .hasHighLevelConsumerType()) {
+    if (isRealtimeTable && IngestionConfigUtils.hasHighLevelConsumerType(tableConfig)) {
       return;
     }
 
