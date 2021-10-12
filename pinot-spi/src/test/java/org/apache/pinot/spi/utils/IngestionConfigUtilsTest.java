@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.spi.utils;
 
-import com.google.common.collect.Lists;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -57,7 +56,8 @@ public class IngestionConfigUtilsTest {
     Map<String, String> streamConfigMap = new HashMap<>();
     streamConfigMap.put("streamType", "kafka");
     tableConfig.setIngestionConfig(
-        new IngestionConfig(null, new StreamIngestionConfig(Collections.singletonList(streamConfigMap)), null, null, null));
+        new IngestionConfig(null, new StreamIngestionConfig(Collections.singletonList(streamConfigMap)), null, null,
+            null));
     List<Map<String, String>> actualStreamConfigsMaps = IngestionConfigUtils.getStreamConfigMaps(tableConfig);
     Assert.assertEquals(actualStreamConfigsMaps.size(), 1);
     Map<String, String> actualStreamConfigsMap = actualStreamConfigsMaps.get(0);
