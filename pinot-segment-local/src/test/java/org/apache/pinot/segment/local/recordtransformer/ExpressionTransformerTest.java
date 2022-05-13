@@ -329,4 +329,32 @@ public class ExpressionTransformerTest {
             .setIngestionConfig(ingestionConfig).build();
     ExpressionTransformer expressionTransformer = new ExpressionTransformer(tableConfig, schema);
   }
+
+  @Test
+  public void testTransformFunctionWithOutptColumnEqualToArgumentColumn() {
+    Schema schema = new Schema.SchemaBuilder().addSingleValueDimension("a", FieldSpec.DataType.INT)
+        .addSingleValueDimension("b", FieldSpec.DataType.INT).addSingleValueDimension("c", FieldSpec.DataType.INT)
+        .build();
+
+    // Define transform function dependencies: a->(b,c), b->d, d->(d,e), c->(d,e)
+    List<TransformConfig> transformConfigs = new ArrayList<>();
+    transformConfigs.add(new TransformConfig("a", "plus(b,c)"));
+    transformConfigs.add(new TransformConfig("b", "plus(d,10)"));
+    transformConfigs.add(new TransformConfig("d", "plus(d,e)"));
+    transformConfigs.add(new TransformConfig("c", "plus(d,e)"));
+
+    IngestionConfig ingestionConfig = new IngestionConfig(null, null, null, transformConfigs, null);
+    TableConfig tableConfig =
+        new TableConfigBuilder(TableType.OFFLINE).setTableName("testNonCyclicTransformFunctionSortOrder")
+            .setIngestionConfig(ingestionConfig).build();
+    ExpressionTransformer expressionTransformer = new ExpressionTransformer(tableConfig, schema);
+
+    // Check topological sort order
+    Iterator<String> sortedColumns = expressionTransformer._expressionEvaluators.keySet().iterator();
+    Assert.assertEquals(sortedColumns.next(), "d");
+    Assert.assertEquals(sortedColumns.next(), "b");
+    Assert.assertEquals(sortedColumns.next(), "c");
+    Assert.assertEquals(sortedColumns.next(), "a");
+
+  }
 }

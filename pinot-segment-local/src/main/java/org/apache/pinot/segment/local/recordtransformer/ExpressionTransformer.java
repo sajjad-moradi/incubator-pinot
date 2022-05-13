@@ -105,7 +105,8 @@ public class ExpressionTransformer implements RecordTransformer {
     if (discoveredNames.add(column)) {
       List<String> arguments = functionEvaluator.getArguments();
       for (String arg : arguments) {
-        if (!_expressionEvaluators.containsKey(arg)) {
+        if (!_expressionEvaluators.containsKey(arg)
+            && !arg.equals(column) /* This check allows functions like 'colA <- func(colA, colB, ...)' */) {
           topologicalSort(arg, expressionEvaluators, discoveredNames);
         }
       }
