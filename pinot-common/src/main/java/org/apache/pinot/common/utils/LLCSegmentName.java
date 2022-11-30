@@ -56,7 +56,19 @@ public class LLCSegmentName extends SegmentName implements Comparable {
     _sequenceNumber = sequenceNumber;
     // ISO8601 date: 20160120T1234Z
     _creationTime = DATE_FORMATTER.print(msSinceEpoch);
-    _segmentName = tableName + SEPARATOR + partitionGroupId + SEPARATOR + sequenceNumber + SEPARATOR + _creationTime;
+    _segmentName = constructSegmentName(tableName, partitionGroupId, sequenceNumber, _creationTime);
+  }
+
+  private String constructSegmentName(String tableName, int partitionGroupId, int sequenceNumber, String creationTime) {
+    return tableName + SEPARATOR + partitionGroupId + SEPARATOR + sequenceNumber + SEPARATOR + creationTime;
+  }
+
+  public LLCSegmentName(String tableName, int partitionGroupId, int sequenceNumber, String creationTime) {
+    _tableName = tableName;
+    _partitionGroupId = partitionGroupId;
+    _sequenceNumber = sequenceNumber;
+    _creationTime = creationTime;
+    _segmentName = constructSegmentName(tableName, partitionGroupId, sequenceNumber, creationTime);
   }
 
   private LLCSegmentName(String tableName, int partitionGroupId, int sequenceNumber, String creationTime,

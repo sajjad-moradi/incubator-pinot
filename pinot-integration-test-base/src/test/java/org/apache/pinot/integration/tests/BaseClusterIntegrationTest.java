@@ -146,7 +146,7 @@ public abstract class BaseClusterIntegrationTest extends ClusterTest {
 
   protected int getRealtimeSegmentFlushSize() {
     if (useLlc()) {
-      return DEFAULT_LLC_SEGMENT_FLUSH_SIZE;
+      return 10;//DEFAULT_LLC_SEGMENT_FLUSH_SIZE;
     } else {
       return DEFAULT_HLC_SEGMENT_FLUSH_SIZE;
     }
@@ -174,7 +174,7 @@ public abstract class BaseClusterIntegrationTest extends ClusterTest {
 
   protected int getNumKafkaPartitions() {
     if (useLlc()) {
-      return DEFAULT_LLC_NUM_KAFKA_PARTITIONS;
+      return 1;//DEFAULT_LLC_NUM_KAFKA_PARTITIONS;
     } else {
       return DEFAULT_HLC_NUM_KAFKA_PARTITIONS;
     }
@@ -378,6 +378,7 @@ public abstract class BaseClusterIntegrationTest extends ClusterTest {
         AvroFileSchemaKafkaAvroMessageDecoder.class.getName());
     streamConfigMap.put(StreamConfigProperties.SEGMENT_FLUSH_THRESHOLD_ROWS,
         Integer.toString(getRealtimeSegmentFlushSize()));
+    streamConfigMap.put(StreamConfigProperties.IS_STOPLESS_CONSUMPTION_ENABLED, "true");
     streamConfigMap.put(StreamConfigProperties.constructStreamProperty(streamType,
         StreamConfigProperties.STREAM_CONSUMER_OFFSET_CRITERIA), "smallest");
     return streamConfigMap;

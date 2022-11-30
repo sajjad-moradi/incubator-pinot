@@ -436,7 +436,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
    * existing segment with the same name.
    */
   @Nullable
-  protected SegmentDataManager registerSegment(String segmentName, SegmentDataManager segmentDataManager) {
+  public SegmentDataManager registerSegment(String segmentName, SegmentDataManager segmentDataManager) {
     SegmentDataManager oldSegmentDataManager = _segmentDataManagerMap.put(segmentName, segmentDataManager);
     _recentlyDeletedSegments.invalidate(segmentName);
     return oldSegmentDataManager;
@@ -450,7 +450,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
    * identify this scenario.
    */
   @Nullable
-  protected SegmentDataManager unregisterSegment(String segmentName) {
+  public SegmentDataManager unregisterSegment(String segmentName) {
     _recentlyDeletedSegments.put(segmentName, segmentName);
     return _segmentDataManagerMap.remove(segmentName);
   }

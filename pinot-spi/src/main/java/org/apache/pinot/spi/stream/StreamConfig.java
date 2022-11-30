@@ -89,6 +89,8 @@ public class StreamConfig {
   // Allow overriding it to use different offset criteria
   private OffsetCriteria _offsetCriteria;
 
+  private boolean _isStoplessConsumptionEnabled;
+
   /**
    * Initializes a StreamConfig using the map of stream configs from the table config
    */
@@ -210,6 +212,9 @@ public class StreamConfig {
 
     String rate = streamConfigMap.get(StreamConfigProperties.TOPIC_CONSUMPTION_RATE_LIMIT);
     _topicConsumptionRateLimit = rate != null ? Double.parseDouble(rate) : CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED;
+
+    _isStoplessConsumptionEnabled =
+        Boolean.parseBoolean(streamConfigMap.get(StreamConfigProperties.IS_STOPLESS_CONSUMPTION_ENABLED));
 
     _streamConfigMap.putAll(streamConfigMap);
   }
@@ -360,6 +365,10 @@ public class StreamConfig {
         : Optional.of(_topicConsumptionRateLimit);
   }
 
+  public boolean isStoplessConsumptionEnabled() {
+    return _isStoplessConsumptionEnabled;
+  }
+
   public String getTableNameWithType() {
     return _tableNameWithType;
   }
@@ -378,7 +387,8 @@ public class StreamConfig {
         + ", _flushSegmentDesiredSizeBytes=" + _flushThresholdSegmentSizeBytes + ", _flushAutotuneInitialRows="
         + _flushAutotuneInitialRows + ", _decoderClass='" + _decoderClass + '\'' + ", _decoderProperties="
         + _decoderProperties + ", _groupId='" + _groupId + "', _topicConsumptionRateLimit=" + _topicConsumptionRateLimit
-        + ", _tableNameWithType='" + _tableNameWithType + '}';
+        + ", _tableNameWithType='" + _tableNameWithType + ", _isStoplessConsumptionEnabled="
+        + _isStoplessConsumptionEnabled + '}';
   }
 
   @Override
@@ -405,7 +415,8 @@ public class StreamConfig {
         that._decoderClass) && EqualityUtils.isEqual(_decoderProperties, that._decoderProperties)
         && EqualityUtils.isEqual(_groupId, that._groupId) && EqualityUtils.isEqual(_tableNameWithType,
         that._tableNameWithType) && EqualityUtils.isEqual(_topicConsumptionRateLimit, that._topicConsumptionRateLimit)
-        && EqualityUtils.isEqual(_streamConfigMap, that._streamConfigMap);
+        && EqualityUtils.isEqual(_streamConfigMap, that._streamConfigMap)
+        && EqualityUtils.isEqual(_isStoplessConsumptionEnabled, that._isStoplessConsumptionEnabled);
   }
 
   @Override
@@ -428,6 +439,7 @@ public class StreamConfig {
     result = EqualityUtils.hashCodeOf(result, _topicConsumptionRateLimit);
     result = EqualityUtils.hashCodeOf(result, _streamConfigMap);
     result = EqualityUtils.hashCodeOf(result, _tableNameWithType);
+    result = EqualityUtils.hashCodeOf(result, _isStoplessConsumptionEnabled);
     return result;
   }
 }

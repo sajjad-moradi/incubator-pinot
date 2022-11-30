@@ -29,6 +29,8 @@ import org.apache.pinot.spi.config.table.ingestion.AggregationConfig;
 import org.apache.pinot.spi.config.table.ingestion.BatchIngestionConfig;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.ingestion.batch.BatchConfigProperties;
+import org.apache.pinot.spi.stream.StreamConfig;
+import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 
 
 /**
@@ -72,6 +74,12 @@ public final class IngestionConfigUtils {
       throw new IllegalStateException("Could not find streamConfigs for REALTIME table: " + tableNameWithType);
     }
     return streamConfigMap;
+  }
+
+  public static StreamConfig getStreamConfig(TableConfig tableConfig) {
+    String tableNameWithType =
+        TableNameBuilder.forType(tableConfig.getTableType()).tableNameWithType(tableConfig.getTableName());
+    return new StreamConfig(tableNameWithType, IngestionConfigUtils.getStreamConfigMap(tableConfig));
   }
 
   public static List<AggregationConfig> getAggregationConfigs(TableConfig tableConfig) {

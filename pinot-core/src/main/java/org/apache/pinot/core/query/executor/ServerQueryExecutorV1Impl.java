@@ -21,10 +21,12 @@ package org.apache.pinot.core.query.executor;
 import com.google.common.base.Preconditions;
 import io.grpc.stub.StreamObserver;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -46,6 +48,7 @@ import org.apache.pinot.core.common.ExplainPlanRows;
 import org.apache.pinot.core.common.Operator;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
 import org.apache.pinot.core.data.manager.realtime.RealtimeTableDataManager;
+import org.apache.pinot.core.data.manager.realtime.StoplessConsumptionManager;
 import org.apache.pinot.core.operator.blocks.InstanceResponseBlock;
 import org.apache.pinot.core.operator.blocks.results.AggregationResultsBlock;
 import org.apache.pinot.core.operator.blocks.results.BaseResultsBlock;
@@ -194,6 +197,10 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
     }
 
     List<String> segmentsToQuery = queryRequest.getSegmentsToQuery();
+
+    // add temporary realtime segments
+    segmentsToQuery.addAll(StoplessConsumptionManager.getInstance().getTemporarySegmentsFor(segmentsToQuery));
+
     List<String> notAcquiredSegments = new ArrayList<>();
     List<SegmentDataManager> segmentDataManagers =
         tableDataManager.acquireSegments(segmentsToQuery, notAcquiredSegments);

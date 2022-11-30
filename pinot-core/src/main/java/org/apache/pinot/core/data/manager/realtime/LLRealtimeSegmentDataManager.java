@@ -211,6 +211,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private static final int BUILD_TIME_LEASE_SECONDS = 30;
   private static final int MAX_CONSECUTIVE_ERROR_COUNT = 5;
 
+  private boolean _isTempSegmentForStoplessConsumption;
   private final SegmentZKMetadata _segmentZKMetadata;
   private final TableConfig _tableConfig;
   private final RealtimeTableDataManager _realtimeTableDataManager;
@@ -218,7 +219,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private final int _segmentMaxRowCount;
   private final String _resourceDataDir;
   private final IndexLoadingConfig _indexLoadingConfig;
-  private final Schema _schema;
+  private Schema _schema;
   // Semaphore for each partitionGroupId only, which is to prevent two different stream consumers
   // from consuming with the same partitionGroupId in parallel in the same host.
   // See the comments in {@link RealtimeTableDataManager}.
@@ -238,7 +239,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private volatile int _numRowsErrored = 0;
   private volatile int _consecutiveErrorCount = 0;
   private long _startTimeMs = 0;
-  private final String _segmentNameStr;
+  private String _segmentNameStr;
+  private String _streamTopic;
   private final SegmentVersion _segmentVersion;
   private final SegmentBuildTimeLeaseExtender _leaseExtender;
   private SegmentBuildDescriptor _segmentBuildDescriptor;
@@ -260,8 +262,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private Thread _consumerThread;
   private final int _partitionGroupId;
   private final PartitionGroupConsumptionStatus _partitionGroupConsumptionStatus;
-  final String _clientId;
-  private final LLCSegmentName _llcSegmentName;
+  private String _clientId;
+  private LLCSegmentName _llcSegmentName;
   private final TransformPipeline _transformPipeline;
   private PartitionGroupConsumer _partitionGroupConsumer = null;
   private StreamMetadataProvider _partitionMetadataProvider = null;
@@ -301,7 +303,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
         //   - the max time we are allowed to consume has passed;
         //   - partition group is ended
         //   - force commit message has been received
-        if (now >= _consumeEndTime) {
+        // Please note that in case the table is configured for stopless consumption, time check is skipped
+        if (!_partitionLevelStreamConfig.isStoplessConsumptionEnabled() && now >= _consumeEndTime) {
           if (!_hasMessagesFetched) {
             _segmentLogger.info("No events came in, extending time by {} hours", TIME_EXTENSION_ON_EMPTY_SEGMENT_HOURS);
             _consumeEndTime += TimeUnit.HOURS.toMillis(TIME_EXTENSION_ON_EMPTY_SEGMENT_HOURS);
@@ -624,6 +627,11 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
           _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LLC_PARTITION_CONSUMING, 0);
           if (_shouldStop) {
             break;
+          } else if (!_isTempSegmentForStoplessConsumption && !_forceCommitMessageReceived && !_endOfPartitionGroup
+              && _partitionLevelStreamConfig.isStoplessConsumptionEnabled()) {
+            StoplessConsumptionManager.getInstance().kickOffTemporaryConsumption(_segmentZKMetadata, _tableConfig,
+                _realtimeTableDataManager, _resourceDataDir, _indexLoadingConfig, _schema, _llcSegmentName,
+                _partitionGroupConsumerSemaphore, _serverMetrics, _currentOffset, _partitionGroupId);
           }
 
           if (_state == State.INITIAL_CONSUMING) {
@@ -1015,6 +1023,9 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     closePartitionMetadataProvider();
     if (_acquiredConsumerSemaphore.compareAndSet(true, false)) {
       _partitionGroupConsumerSemaphore.release();
+      if (_partitionLevelStreamConfig.isStoplessConsumptionEnabled()) {
+        StoplessConsumptionManager.getInstance().acquireConsumerSemaphore(_segmentNameStr);
+      }
     }
   }
 
@@ -1034,6 +1045,24 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
         _segmentLogger.warn("Could not close stream metadata provider", e);
       }
     }
+  }
+
+  public void makeTemporarySegmentPermanent(SegmentZKMetadata segmentZKMetadata, Schema newSchema) {
+
+    // close stream connections
+    closePartitionGroupConsumer();
+    closePartitionMetadataProvider();
+
+    // update variables to be in permanent form
+    _isTempSegmentForStoplessConsumption = false;
+    _segmentNameStr = segmentZKMetadata.getSegmentName();
+    _llcSegmentName = LLCSegmentName.of(_segmentNameStr);
+    _clientId = createClientId();
+    _schema = newSchema;
+
+    // start stream connections
+    makeStreamConsumer("Starting after making the temp segment permanent");
+    createPartitionMetadataProvider("Starting after making the temp segment permanent");
   }
 
   /**
@@ -1245,7 +1274,9 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
       RealtimeTableDataManager realtimeTableDataManager, String resourceDataDir, IndexLoadingConfig indexLoadingConfig,
       Schema schema, LLCSegmentName llcSegmentName, Semaphore partitionGroupConsumerSemaphore,
       ServerMetrics serverMetrics, @Nullable PartitionUpsertMetadataManager partitionUpsertMetadataManager,
-      @Nullable PartitionDedupMetadataManager partitionDedupMetadataManager) {
+      @Nullable PartitionDedupMetadataManager partitionDedupMetadataManager,
+      boolean isTempSegmentForStoplessConsumption) {
+    _isTempSegmentForStoplessConsumption = isTempSegmentForStoplessConsumption;
     _segBuildSemaphore = realtimeTableDataManager.getSegmentBuildSemaphore();
     _segmentZKMetadata = segmentZKMetadata;
     _tableConfig = tableConfig;
@@ -1267,7 +1298,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
         new PartitionLevelStreamConfig(_tableNameWithType, IngestionConfigUtils.getStreamConfigMap(_tableConfig));
     _streamConsumerFactory = StreamConsumerFactoryProvider.create(_partitionLevelStreamConfig);
     _streamPartitionMsgOffsetFactory = _streamConsumerFactory.createStreamMsgOffsetFactory();
-    String streamTopic = _partitionLevelStreamConfig.getTopicName();
+    _streamTopic = _partitionLevelStreamConfig.getTopicName();
     _segmentNameStr = _segmentZKMetadata.getSegmentName();
     _llcSegmentName = llcSegmentName;
     _partitionGroupId = _llcSegmentName.getPartitionGroupId();
@@ -1279,9 +1310,9 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
             _segmentZKMetadata.getStatus().toString());
     _partitionGroupConsumerSemaphore = partitionGroupConsumerSemaphore;
     _acquiredConsumerSemaphore = new AtomicBoolean(false);
-    _metricKeyName = _tableNameWithType + "-" + streamTopic + "-" + _partitionGroupId;
+    _metricKeyName = _tableNameWithType + "-" + _streamTopic + "-" + _partitionGroupId;
     _segmentLogger = LoggerFactory.getLogger(LLRealtimeSegmentDataManager.class.getName() + "_" + _segmentNameStr);
-    _tableStreamName = _tableNameWithType + "_" + streamTopic;
+    _tableStreamName = _tableNameWithType + "_" + _streamTopic;
     _memoryManager = getMemoryManager(realtimeTableDataManager.getConsumerDir(), _segmentNameStr,
         indexLoadingConfig.isRealtimeOffHeapAllocation(), indexLoadingConfig.isDirectRealtimeOffHeapAllocation(),
         serverMetrics);
@@ -1340,7 +1371,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     String consumerDir = realtimeTableDataManager.getConsumerDir();
     RealtimeSegmentConfig.Builder realtimeSegmentConfigBuilder =
         new RealtimeSegmentConfig.Builder().setTableNameWithType(_tableNameWithType).setSegmentName(_segmentNameStr)
-            .setStreamName(streamTopic).setSchema(_schema).setTimeColumnName(timeColumnName)
+            .setStreamName(_streamTopic).setSchema(_schema).setTimeColumnName(timeColumnName)
             .setCapacity(_segmentMaxRowCount).setAvgNumMultiValues(indexLoadingConfig.getRealtimeAvgMultiValueCount())
             .setNoDictionaryColumns(indexLoadingConfig.getNoDictionaryColumns())
             .setVarLengthDictionaryColumns(indexLoadingConfig.getVarLengthDictionaryColumns())
@@ -1363,17 +1394,14 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     Set<String> fieldsToRead = IngestionUtils.getFieldsForRecordExtractor(_tableConfig.getIngestionConfig(), _schema);
     StreamMessageDecoder streamMessageDecoder = StreamDecoderProvider.create(_partitionLevelStreamConfig, fieldsToRead);
     _streamDataDecoder = new StreamDataDecoderImpl(streamMessageDecoder);
-    _clientId = streamTopic + "-" + _partitionGroupId;
+    _clientId = createClientId();
 
     _transformPipeline = new TransformPipeline(tableConfig, schema);
-    // Acquire semaphore to create stream consumers
-    try {
-      _partitionGroupConsumerSemaphore.acquire();
-      _acquiredConsumerSemaphore.set(true);
-    } catch (InterruptedException e) {
-      String errorMsg = "InterruptedException when acquiring the partitionConsumerSemaphore";
-      _segmentLogger.error(errorMsg);
-      throw new RuntimeException(errorMsg + " for segment: " + _segmentNameStr);
+
+    if (!isTempSegmentForStoplessConsumption) {
+      // Acquire semaphore needed for creating stream consumers
+      // For temporary segment, the semaphore will be acquired when the primary segment releases it.
+      acquireConsumerSemaphore();
     }
 
     try {
@@ -1401,8 +1429,27 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
       // In case of exception thrown here, segment goes to ERROR state. Then any attempt to reset the segment from
       // ERROR -> OFFLINE -> CONSUMING via Helix Admin fails because the semaphore is acquired, but not released.
       // Hence releasing the semaphore here to unblock reset operation via Helix Admin.
-      _partitionGroupConsumerSemaphore.release();
+      if (_acquiredConsumerSemaphore.get()) {
+        _partitionGroupConsumerSemaphore.release();
+      }
       throw e;
+    }
+  }
+
+  private String createClientId() {
+    return _isTempSegmentForStoplessConsumption
+        ? _streamTopic + "-" + _partitionGroupId + "-tmp-stopless-consumption"
+        : _streamTopic + "-" + _partitionGroupId;
+  }
+
+  public void acquireConsumerSemaphore() {
+    try {
+      _partitionGroupConsumerSemaphore.acquire();
+      _acquiredConsumerSemaphore.set(true);
+    } catch (InterruptedException e) {
+      String errorMsg = "InterruptedException when acquiring the partitionConsumerSemaphore";
+      _segmentLogger.error(errorMsg);
+      throw new RuntimeException(errorMsg + " for segment: " + _segmentNameStr);
     }
   }
 
@@ -1526,7 +1573,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
    */
   private void createPartitionMetadataProvider(String reason) {
     closePartitionMetadataProvider();
-    _segmentLogger.info("Creating new partition metadata provider, reason: {}", reason);
+    _segmentLogger.info("Creating new partition metadata provider for topic partition {}, reason: {}", _clientId,
+        reason);
     _partitionMetadataProvider = _streamConsumerFactory.createPartitionMetadataProvider(_clientId, _partitionGroupId);
   }
 
@@ -1569,5 +1617,21 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
 
   public void forceCommit() {
     _forceCommitMessageReceived = true;
+  }
+
+  public int getPartitionGroupId() {
+    return _partitionGroupId;
+  }
+
+  public StreamPartitionMsgOffset getStartOffset() {
+    return _startOffset;
+  }
+
+  public TableConfig getTableConfig() {
+    return _tableConfig;
+  }
+
+  public Schema getSchema() {
+    return _schema;
   }
 }

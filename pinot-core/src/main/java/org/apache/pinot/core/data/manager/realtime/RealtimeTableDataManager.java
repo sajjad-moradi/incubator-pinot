@@ -71,8 +71,10 @@ import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.UpsertConfig;
 import org.apache.pinot.spi.data.FieldSpec;
 import org.apache.pinot.spi.data.Schema;
+import org.apache.pinot.spi.stream.StreamConfig;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Segment.Realtime.Status;
+import org.apache.pinot.spi.utils.IngestionConfigUtils;
 
 import static org.apache.pinot.spi.utils.CommonConstants.Segment.METADATA_URI_FOR_PEER_DOWNLOAD;
 
@@ -330,6 +332,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
       _logger.error("Not adding segment {}", segmentName);
       throw new RuntimeException("Mismatching schema/table config for " + _tableNameWithType);
     }
+    Schema schemaWithNoVirtualColumns = schema.clone();
     VirtualColumnProviderFactory.addBuiltInVirtualColumnsToSegmentSchema(schema, segmentName);
 
     if (!isHLCSegment) {
@@ -358,10 +361,21 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
       schema = SegmentGeneratorConfig.updateSchemaWithTimestampIndexes(schema,
           SegmentGeneratorConfig.extractTimestampIndexConfigsFromTableConfig(tableConfig));
 
-      segmentDataManager =
-          new LLRealtimeSegmentDataManager(segmentZKMetadata, tableConfig, this, _indexDir.getAbsolutePath(),
-              indexLoadingConfig, schema, llcSegmentName, semaphore, _serverMetrics, partitionUpsertMetadataManager,
-              partitionDedupMetadataManager);
+      LLRealtimeSegmentDataManager tempSegmentDataManager = null;
+      if (IngestionConfigUtils.getStreamConfig(tableConfig).isStoplessConsumptionEnabled()) {
+        tempSegmentDataManager = StoplessConsumptionManager.getInstance()
+            .validateAndGetTemporarySegment(llcSegmentName.getPartitionGroupId(), segmentZKMetadata, tableConfig,
+                schema);
+      }
+      if (tempSegmentDataManager != null) {
+        _segmentDataManagerMap.remove(tempSegmentDataManager);
+        segmentDataManager = tempSegmentDataManager;
+      } else {
+        segmentDataManager =
+            new LLRealtimeSegmentDataManager(segmentZKMetadata, tableConfig, this, _indexDir.getAbsolutePath(),
+                indexLoadingConfig, schema, llcSegmentName, semaphore, _serverMetrics, partitionUpsertMetadataManager,
+                partitionDedupMetadataManager, false);
+      }
     } else {
       InstanceZKMetadata instanceZKMetadata = ZKMetadataProvider.getInstanceZKMetadata(_propertyStore, _instanceId);
       segmentDataManager = new HLRealtimeSegmentDataManager(segmentZKMetadata, tableConfig, instanceZKMetadata, this,
