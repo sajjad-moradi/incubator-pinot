@@ -22,6 +22,7 @@ import com.google.common.base.Preconditions;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import javax.annotation.concurrent.ThreadSafe;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.io.FileUtils;
@@ -115,15 +117,24 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
 
   private TableDedupMetadataManager _tableDedupMetadataManager;
   private TableUpsertMetadataManager _tableUpsertMetadataManager;
+  // Object to track ingestion delay for all partitions
+  private IngestionDelayTracker _ingestionDelayTracker;
+  private Supplier<Boolean> _isServingQueries;
 
   public RealtimeTableDataManager(Semaphore segmentBuildSemaphore) {
+    this(segmentBuildSemaphore, () -> true);
+  }
+
+  public RealtimeTableDataManager(Semaphore segmentBuildSemaphore, Supplier<Boolean> isServerServingQueries) {
     _segmentBuildSemaphore = segmentBuildSemaphore;
+    _isServingQueries = isServerServingQueries;
   }
 
   @Override
   protected void doInit() {
     _leaseExtender = SegmentBuildTimeLeaseExtender.getOrCreate(_instanceId, _serverMetrics, _tableNameWithType);
-
+    // Tracks ingestion delay of all partitions being served for this table
+    _ingestionDelayTracker = new IngestionDelayTracker(_serverMetrics, _tableNameWithType, this);
     File statsFile = new File(_tableDataDir, STATS_FILE_NAME);
     try {
       _statsHistory = RealtimeSegmentStatsHistory.deserialzeFrom(statsFile);
@@ -212,6 +223,78 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
     if (_leaseExtender != null) {
       _leaseExtender.shutDown();
     }
+    // Make sure we do metric cleanup when we shut down the table.
+    _ingestionDelayTracker.shutdown();
+  }
+
+  /*
+   * Method to handle CONSUMING->DROPPED transition.
+   *
+   * @param partitionGroupId Partition id that we must stop tracking on this server.
+   */
+  private void stopTrackingPartitionDelay(int partitionGroupId) {
+    _ingestionDelayTracker.stopTrackingPartitionIngestionDelay(partitionGroupId);
+  }
+
+  /*
+   * Method to handle CONSUMING->ONLINE transition.
+   * If no new ingestion is noticed for this segment in some timeout, we will read
+   * ideal state to verify the partition is still hosted in this server.
+   *
+   * @param partitionGroupId partition id of partition to be verified as hosted by this server.
+   */
+  private void markPartitionForVerification(int partitionGroupId) {
+    _ingestionDelayTracker.markPartitionForConfirmation(partitionGroupId);
+  }
+
+  /*
+   * Method used by LLRealtimeSegmentManagers to update their partition delays
+   *
+   * @param ingestionDelayMs Ingestion delay being reported.
+   * @param currentTimeMs Timestamp of the measure being provided, i.e. when this delay was computed.
+   * @param partitionGroupId Partition ID for which delay is being updated.
+   */
+  public void updateIngestionDelay(long ingestionDelayMs, long currenTimeMs, int partitionGroupId) {
+    _ingestionDelayTracker.updateIngestionDelay(ingestionDelayMs, currenTimeMs, partitionGroupId);
+  }
+
+  /*
+   * Method to handle CONSUMING -> DROPPED segment state transitions:
+   * We stop tracking partitions whose segments are dropped.
+   *
+   * @param segmentNameStr name of segment which is transitioning state.
+   */
+  @Override
+  public void onConsumingToDropped(String segmentNameStr) {
+    LLCSegmentName segmentName = new LLCSegmentName(segmentNameStr);
+    stopTrackingPartitionDelay(segmentName.getPartitionGroupId());
+  }
+
+  /*
+   * Method to handle CONSUMING -> ONLINE segment state transitions:
+   * We mark partitions for verification against ideal state when we do not see a consuming segment for some time
+   * for that partition. The idea is to remove the related metrics when the partition moves from the current server.
+   *
+   * @param segmentNameStr name of segment which is transitioning state.
+   */
+  @Override
+  public void onConsumingToOnline(String segmentNameStr) {
+    LLCSegmentName segmentName = new LLCSegmentName(segmentNameStr);
+    markPartitionForVerification(segmentName.getPartitionGroupId());
+  }
+
+  /**
+   * Returns all partitionGroupIds for the partitions hosted by this server for current table.
+   * Note: this involves Zookeeper read and should not be used frequently due to efficiency concerns.
+   */
+  public List<Integer> getHostedPartitionsGroupIds() {
+    ArrayList<Integer> partitionsHostedByThisServer = new ArrayList<>();
+    List<String> segments = TableStateUtils.getOnlineSegmentsForThisInstance(_helixManager, _tableNameWithType);
+    for (String segmentNameStr : segments) {
+      LLCSegmentName segmentName = new LLCSegmentName(segmentNameStr);
+      partitionsHostedByThisServer.add(segmentName.getPartitionGroupId());
+    }
+    return partitionsHostedByThisServer;
   }
 
   public RealtimeSegmentStatsHistory getStatsHistory() {
@@ -351,7 +434,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
       segmentDataManager =
           new LLRealtimeSegmentDataManager(segmentZKMetadata, tableConfig, this, _indexDir.getAbsolutePath(),
               indexLoadingConfig, schema, llcSegmentName, semaphore, _serverMetrics, partitionUpsertMetadataManager,
-              partitionDedupMetadataManager);
+              partitionDedupMetadataManager, _isServingQueries);
     } else {
       InstanceZKMetadata instanceZKMetadata = ZKMetadataProvider.getInstanceZKMetadata(_propertyStore, _instanceId);
       segmentDataManager = new HLRealtimeSegmentDataManager(segmentZKMetadata, tableConfig, instanceZKMetadata, this,

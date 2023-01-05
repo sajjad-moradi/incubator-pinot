@@ -136,6 +136,7 @@ public abstract class BaseServerStarter implements ServiceStartable {
   protected ServerQueriesDisabledTracker _serverQueriesDisabledTracker;
   protected RealtimeLuceneIndexRefreshState _realtimeLuceneIndexRefreshState;
   protected PinotEnvironmentProvider _pinotEnvironmentProvider;
+  protected volatile boolean _isServingQueries = false;
 
   @Override
   public void init(PinotConfiguration serverConf)
@@ -533,6 +534,7 @@ public abstract class BaseServerStarter implements ServiceStartable {
     _serverInstance = new ServerInstance(serverConf, _helixManager, accessControlFactory);
     ServerMetrics serverMetrics = _serverInstance.getServerMetrics();
     InstanceDataManager instanceDataManager = _serverInstance.getInstanceDataManager();
+    instanceDataManager.setSupplierOfServerServingQueries(() -> _isServingQueries);
     initSegmentFetcher(_serverConf);
     StateModelFactory<?> stateModelFactory =
         new SegmentOnlineOfflineStateModelFactory(_instanceId, instanceDataManager);
@@ -582,6 +584,8 @@ public abstract class BaseServerStarter implements ServiceStartable {
     _serverInstance.startQueryServer();
     _helixAdmin.setConfig(_instanceConfigScope,
         Collections.singletonMap(Helix.IS_SHUTDOWN_IN_PROGRESS, Boolean.toString(false)));
+
+    _isServingQueries = true;
 
     // Throttling for realtime consumption is disabled up to this point to allow maximum consumption during startup time
     RealtimeConsumptionRateManager.getInstance().enableThrottling();
