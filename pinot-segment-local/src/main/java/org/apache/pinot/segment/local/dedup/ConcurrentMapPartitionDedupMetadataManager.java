@@ -19,11 +19,13 @@
 package org.apache.pinot.segment.local.dedup;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import org.apache.pinot.common.metrics.ServerGauge;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.segment.local.segment.readers.PinotSegmentColumnReader;
@@ -32,8 +34,13 @@ import org.apache.pinot.segment.spi.IndexSegment;
 import org.apache.pinot.spi.config.table.HashFunction;
 import org.apache.pinot.spi.data.readers.PrimaryKey;
 import org.apache.pinot.spi.utils.ByteArray;
+import org.slf4j.Logger;
+
 
 class ConcurrentMapPartitionDedupMetadataManager implements PartitionDedupMetadataManager {
+
+  private static final Logger LOGGER =
+      org.slf4j.LoggerFactory.getLogger(ConcurrentMapPartitionDedupMetadataManager.class);
   private final String _tableNameWithType;
   private final List<String> _primaryKeyColumns;
   private final int _partitionId;
@@ -41,7 +48,14 @@ class ConcurrentMapPartitionDedupMetadataManager implements PartitionDedupMetada
   private final HashFunction _hashFunction;
 
   @VisibleForTesting
-  final ConcurrentHashMap<Object, IndexSegment> _primaryKeyToSegmentMap = new ConcurrentHashMap<>();
+  final Cache<Object, IndexSegment> _primaryKeyToSegmentMap = CacheBuilder.newBuilder()
+//      .expireAfterWrite(8, TimeUnit.HOURS)
+      .expireAfterWrite(500, TimeUnit.MILLISECONDS)
+      .build();
+
+  // params for clean up
+  int _msgCounter = 0;
+  private final int _cleanUpThreshold;
 
   public ConcurrentMapPartitionDedupMetadataManager(String tableNameWithType, List<String> primaryKeyColumns,
       int partitionId, ServerMetrics serverMetrics, HashFunction hashFunction) {
@@ -50,34 +64,17 @@ class ConcurrentMapPartitionDedupMetadataManager implements PartitionDedupMetada
     _partitionId = partitionId;
     _serverMetrics = serverMetrics;
     _hashFunction = hashFunction;
+    _cleanUpThreshold = 10_000 + partitionId * 250;
+    LOGGER.info("Using time-based dedup manager for table: {}, partition: {}, cleanup threshold: {}", tableNameWithType,
+        partitionId, _cleanUpThreshold);
   }
 
   public void addSegment(IndexSegment segment) {
-    // Add all PKs to _primaryKeyToSegmentMap
-    Iterator<PrimaryKey> primaryKeyIterator = getPrimaryKeyIterator(segment);
-    while (primaryKeyIterator.hasNext()) {
-      PrimaryKey pk = primaryKeyIterator.next();
-      _primaryKeyToSegmentMap.put(HashUtils.hashPrimaryKey(pk, _hashFunction), segment);
-    }
-    _serverMetrics.setValueOfPartitionGauge(_tableNameWithType, _partitionId, ServerGauge.DEDUP_PRIMARY_KEYS_COUNT,
-        _primaryKeyToSegmentMap.size());
+    // Do nothing
   }
 
   public void removeSegment(IndexSegment segment) {
-    // TODO(saurabh): Explain reload scenario here
-    Iterator<PrimaryKey> primaryKeyIterator = getPrimaryKeyIterator(segment);
-    while (primaryKeyIterator.hasNext()) {
-      PrimaryKey pk = primaryKeyIterator.next();
-      _primaryKeyToSegmentMap.compute(HashUtils.hashPrimaryKey(pk, _hashFunction), (primaryKey, currentSegment) -> {
-        if (currentSegment == segment) {
-          return null;
-        } else {
-          return currentSegment;
-        }
-      });
-    }
-    _serverMetrics.setValueOfPartitionGauge(_tableNameWithType, _partitionId, ServerGauge.DEDUP_PRIMARY_KEYS_COUNT,
-        _primaryKeyToSegmentMap.size());
+    // Do nothing
   }
 
   @VisibleForTesting
@@ -114,10 +111,13 @@ class ConcurrentMapPartitionDedupMetadataManager implements PartitionDedupMetada
 
   public boolean checkRecordPresentOrUpdate(PrimaryKey pk, IndexSegment indexSegment) {
     boolean present =
-        _primaryKeyToSegmentMap.putIfAbsent(HashUtils.hashPrimaryKey(pk, _hashFunction), indexSegment) != null;
+        _primaryKeyToSegmentMap.asMap().putIfAbsent(HashUtils.hashPrimaryKey(pk, _hashFunction), indexSegment) != null;
     if (!present) {
       _serverMetrics.setValueOfPartitionGauge(_tableNameWithType, _partitionId, ServerGauge.DEDUP_PRIMARY_KEYS_COUNT,
           _primaryKeyToSegmentMap.size());
+    }
+    if (++_msgCounter % _cleanUpThreshold == 0) {
+      _primaryKeyToSegmentMap.cleanUp();
     }
     return present;
   }
